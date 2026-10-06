@@ -5,6 +5,7 @@ name: CRM watchdog
 # that is the safe fix, emails the owner, and commits docs/status.json for the
 # public status page (GitHub Pages serves /docs).
 # Secrets: SUPABASE_ACCESS_TOKEN, RESEND_API_KEY, ALERT_TO.
+# First scheduled run pushed Oct 6 2026; GitHub may take a while to start a new schedule.
 
 on:
   schedule:
