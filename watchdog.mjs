@@ -22,6 +22,11 @@ const HEALTH_URL = process.env.HEALTH_URL || "https://crm.ceceremechanical.com/a
 const PROJECT_REF = process.env.PROJECT_REF || "lfpeissdrcmjybnykjfj";
 const TOKEN = process.env.SUPABASE_ACCESS_TOKEN || "";
 const RESEND_KEY = process.env.RESEND_API_KEY || "";
+// Direct probes of the CRM's Supabase project (public URL + public anon key):
+// a second opinion on "hung" that does not depend on Supabase's own health API.
+const SUPABASE_URL = process.env.SUPABASE_URL || `https://${PROJECT_REF}.supabase.co`;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || "";
+const PROBE_MS = 10_000;
 const ALERT_TO = (process.env.ALERT_TO || "andrew@ceceremechanical.com").split(",").map((s) => s.trim()).filter(Boolean);
 const ALERT_FROM = process.env.ALERT_FROM || "Cecere Mechanical LLC CRM <crm@ceceremechanical.com>";
 const STATE_PATH = process.env.STATE_PATH || new URL("./docs/status.json", import.meta.url).pathname;
@@ -80,7 +85,7 @@ const mgmt = (path, opts = {}) =>
   }, 25_000);
 
 async function diagnose() {
-  const d = { tokenOk: true, projectStatus: null, services: {}, servicesHung: false, dbAnswers: false, detail: "" };
+  const d = { tokenOk: true, mgmtReachable: true, projectStatus: null, services: {}, servicesHung: false, directHung: false, dbAnswers: false, detail: "" };
   if (FORCE_DIAG) return { ...d, projectStatus: "ACTIVE_HEALTHY", ...FORCE_DIAG };
   if (!TOKEN) { d.tokenOk = false; d.detail = "no Supabase token configured"; return d; }
   try {
@@ -89,7 +94,24 @@ async function diagnose() {
     const pj = await p.json().catch(() => ({}));
     d.projectStatus = pj.status || null;
   } catch (e) {
+    d.mgmtReachable = false;
     d.detail = `Supabase management API unreachable: ${e?.message || e}`;
+  }
+  // Direct probes: any HTTP answer within PROBE_MS means the service is alive
+  // (an auth error is still an answer); a timeout or network error means hung.
+  if (SUPABASE_ANON_KEY) {
+    const probe = async (path) => {
+      try {
+        await fetchWithTimeout(`${SUPABASE_URL}${path}`, { headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` }, cache: "no-store" }, PROBE_MS);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const [authAlive, restAlive] = await Promise.all([probe("/auth/v1/health"), probe("/rest/v1/app_settings?select=key&limit=1")]);
+    d.directHung = !authAlive || !restAlive;
+    d.services.direct_auth = authAlive ? "answers" : "no answer";
+    d.services.direct_rest = restAlive ? "answers" : "no answer";
   }
   try {
     const h = await mgmt("/health?services=auth,db,rest,storage,realtime");
@@ -98,6 +120,7 @@ async function diagnose() {
       for (const s of arr) d.services[s.name] = s.status;
       d.servicesHung = ["auth", "rest"].some((n) => d.services[n] && d.services[n] !== "ACTIVE_HEALTHY");
     }
+    if (d.directHung) d.servicesHung = true;
   } catch (e) {
     d.detail += ` services health failed: ${e?.message || e}`;
   }
@@ -173,6 +196,9 @@ async function main() {
   let cause, action, reason;
   if (!d.tokenOk) {
     cause = "unknown (watchdog cannot reach Supabase)"; action = "alert only"; reason = d.detail;
+  } else if (!d.mgmtReachable) {
+    cause = d.directHung ? "Supabase not answering and its management API unreachable (likely a Supabase wide incident)" : "cannot tell: Supabase management API unreachable, direct probes answer";
+    action = "alert only"; reason = "no safe way to diagnose or restart from here";
   } else if (d.projectStatus && d.projectStatus !== "ACTIVE_HEALTHY") {
     cause = `Supabase project is ${d.projectStatus}`; action = "waiting"; reason = "a restart or maintenance is already in progress";
   } else if (d.servicesHung && d.dbAnswers) {
