@@ -120,7 +120,9 @@ async function diagnose() {
       for (const s of arr) d.services[s.name] = s.status;
       d.servicesHung = ["auth", "rest"].some((n) => d.services[n] && d.services[n] !== "ACTIVE_HEALTHY");
     }
-    if (d.directHung) d.servicesHung = true;
+    // Direct probe timeouts are evidence for the email, never grounds for a restart on
+    // their own: a database under heavy load (the Oct 6 2026 history import) times them
+    // out while Supabase's own health report stays ACTIVE_HEALTHY. Only Supabase's report counts.
   } catch (e) {
     d.detail += ` services health failed: ${e?.message || e}`;
   }
@@ -160,14 +162,21 @@ const currentIncident = (s) => s.incidents.find((i) => !i.end) || null;
 async function main() {
   const s = loadState();
   const prev = s.state;
-  const first = await probeHealth();
-  let down = !first.ok;
-  if (down) {
-    console.log(`health ${first.status || "unreachable"}; rechecking in ${RECHECK_WAIT_MS / 1000}s`);
+  // Maintenance switch shared with the Vercel watchdog: app_settings.watchdog_pause_until.
+  if (TOKEN) {
+    try {
+      const pr = await mgmt("/database/query", { method: "POST", body: JSON.stringify({ query: "select value from app_settings where key = 'watchdog_pause_until'" }) });
+      const rows = pr.ok ? await pr.json() : [];
+      const until = rows?.[0]?.value ? String(rows[0].value).replace(/^"|"$/g, "") : null;
+      if (until && new Date(until).getTime() > Date.now()) { console.log("PAUSED until", until); saveState(s); return; }
+    } catch { /* if the database cannot answer this, the normal checks below decide */ }
+  }
+  // Three failed probes over about 90 seconds: a slow database fails one, an outage fails all.
+  let down = !(await probeHealth()).ok;
+  for (let i = 0; down && i < 2; i++) {
+    console.log(`health failed (${i + 1}); rechecking in ${RECHECK_WAIT_MS / 1000}s`);
     await new Promise((r) => setTimeout(r, RECHECK_WAIT_MS));
-    const second = await probeHealth();
-    down = !second.ok;
-    if (down) console.log(`health again ${second.status || "unreachable"}`);
+    down = !(await probeHealth()).ok;
   }
 
   if (!down) {
