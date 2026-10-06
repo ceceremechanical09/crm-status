@@ -1,0 +1,19 @@
+{
+  "state": "up",
+  "since": "2026-10-05T22:49:38.000Z",
+  "lastCheck": null,
+  "lastCommittedCheck": null,
+  "message": "",
+  "restarts": [],
+  "incidents": [
+    {
+      "start": "2026-10-05T21:55:37.000Z",
+      "end": "2026-10-05T22:49:38.000Z",
+      "cause": "Supabase services hung during a Supabase East US incident",
+      "action": "restarted by hand (before the watchdog existed)",
+      "minutes": 54
+    }
+  ],
+  "lastAlertAt": null,
+  "lastTokenAlertDay": null
+}

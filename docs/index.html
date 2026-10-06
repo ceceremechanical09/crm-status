@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Cecere Mechanical CRM status</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; font-family: -apple-system, system-ui, Helvetica, Arial, sans-serif; background: #f7f7f8; color: #111; }
+  main { max-width: 560px; margin: 0 auto; padding: 28px 16px 48px; }
+  img.logo { width: 100%; max-width: 360px; height: auto; display: block; margin: 0 auto 24px; }
+  .card { background: #fff; border-radius: 14px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.08); text-align: center; }
+  .state { font-size: 44px; font-weight: 800; letter-spacing: .5px; margin: 6px 0; }
+  .up .state { color: #15803d; } .down .state { color: #b91c1c; } .restarting .state { color: #c2410c; } .unknown .state { color: #555; }
+  .since, .checked { color: #444; font-size: 16px; margin: 4px 0; }
+  .msg { margin: 16px 0 0; font-size: 16px; line-height: 1.5; color: #222; }
+  h2 { font-size: 16px; margin: 32px 0 8px; color: #333; }
+  ul { padding-left: 18px; line-height: 1.6; font-size: 15px; } li { margin: 4px 0; }
+  .help { background: #fff7ed; border-radius: 12px; padding: 16px 18px; margin-top: 28px; font-size: 15px; line-height: 1.55; }
+  .foot { color: #777; font-size: 13px; margin-top: 28px; text-align: center; }
+</style>
+</head>
+<body>
+<main>
+  <img class="logo" src="logo.png" alt="Cecere Mechanical LLC">
+  <div class="card unknown" id="card">
+    <div class="state" id="state">Checking</div>
+    <div class="since" id="since"></div>
+    <div class="checked" id="checked"></div>
+    <p class="msg" id="msg"></p>
+  </div>
+  <div class="help">
+    <strong>If it says DOWN:</strong> keep working, write times and parts on paper, call the office at (973) 224-7366. Do not re enter anything until it says UP. The CRM fixes the most common failure by itself in about 15 minutes. If it stays down more than 30 minutes, text Andrew.<br><br>
+    <strong>If it says UP and the app still will not load:</strong> the problem is your phone or signal. Close the app, reopen it, and try Wi Fi or cell data.
+  </div>
+  <h2>Recent incidents</h2>
+  <ul id="incidents"><li>None recorded.</li></ul>
+  <p class="foot">Checked every 5 minutes from outside the CRM. Cecere Mechanical LLC, 19 Rt. 10 Unit 18, Succasunna, NJ 07876.</p>
+</main>
+<script>
+  const fmt = (iso) => iso ? new Date(iso).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET" : "";
+  async function load() {
+    try {
+      const r = await fetch("status.json?t=" + Date.now(), { cache: "no-store" });
+      const s = await r.json();
+      const card = document.getElementById("card");
+      card.className = "card " + (s.state || "unknown");
+      document.getElementById("state").textContent = { up: "UP", down: "DOWN", restarting: "RESTARTING" }[s.state] || "UNKNOWN";
+      document.getElementById("since").textContent = (s.state === "up" ? "Up since " : "Since ") + fmt(s.since);
+      const last = s.lastCommittedCheck || s.lastCheck;
+      const ageMin = last ? Math.round((Date.now() - new Date(last)) / 60000) : null;
+      document.getElementById("checked").textContent = last ? ("Last report " + fmt(last) + (ageMin > 90 ? " (the watchdog itself may be delayed)" : "")) : "";
+      document.getElementById("msg").textContent = s.message || (s.state === "up" ? "Everything is answering normally." : "");
+      const ul = document.getElementById("incidents");
+      if (s.incidents && s.incidents.length) {
+        ul.innerHTML = "";
+        for (const i of s.incidents.slice(0, 8)) {
+          const li = document.createElement("li");
+          li.textContent = fmt(i.start) + (i.end ? " to " + fmt(i.end) + " (" + i.minutes + " min)" : " (ongoing)") + ". " + i.cause + ". " + (i.action && i.action !== "none" ? "Action: " + i.action + "." : "");
+          ul.appendChild(li);
+        }
+      }
+    } catch (e) {
+      document.getElementById("state").textContent = "UNKNOWN";
+      document.getElementById("msg").textContent = "Could not read the status file. Try again in a minute.";
+    }
+  }
+  load(); setInterval(load, 60000);
+</script>
+</body>
+</html>
