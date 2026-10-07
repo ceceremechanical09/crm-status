@@ -35,6 +35,12 @@ const DRY_RUN = process.env.DRY_RUN === "1";
 const FORCE_DIAG = DRY_RUN && process.env.FORCE_DIAG ? JSON.parse(process.env.FORCE_DIAG) : null;
 
 const RECHECK_WAIT_MS = Number(process.env.RECHECK_WAIT_MS || 45_000);
+// Oct 7 2026 audit: the CRM's Vercel cron /api/cron/watchdog fires every 5 minutes and
+// restarts hung Supabase services itself. GitHub's schedule is unreliable (4 runs some
+// days) and the two watchdogs kept separate restart state, so both could restart the same
+// outage within a minute. This one now alerts and records status only. Set RESTART_ENABLED
+// to true to hand restarts back to GitHub.
+const RESTART_ENABLED = process.env.RESTART_ENABLED === "1";
 const RESTART_COOLDOWN_MS = 30 * 60_000;
 const MAX_RESTARTS_PER_DAY = 2;
 const REALERT_EVERY_MS = 30 * 60_000;
@@ -212,7 +218,8 @@ async function main() {
     cause = `Supabase project is ${d.projectStatus}`; action = "waiting"; reason = "a restart or maintenance is already in progress";
   } else if (d.servicesHung && d.dbAnswers) {
     cause = "Supabase services hung (auth or REST unhealthy, database answering)";
-    if (sinceLastRestartMs < RESTART_COOLDOWN_MS) { action = "alert only"; reason = `last restart was ${Math.round(sinceLastRestartMs / 60_000)} min ago (30 min cooldown)`; }
+    if (!RESTART_ENABLED) { action = "alert only"; reason = "the CRM's own Vercel watchdog handles restarts (this one only alerts since Oct 7 2026, so the two never restart the same outage twice)"; }
+    else if (sinceLastRestartMs < RESTART_COOLDOWN_MS) { action = "alert only"; reason = `last restart was ${Math.round(sinceLastRestartMs / 60_000)} min ago (30 min cooldown)`; }
     else if (todayRestarts >= MAX_RESTARTS_PER_DAY) { action = "alert only"; reason = `already restarted ${todayRestarts} times today (limit ${MAX_RESTARTS_PER_DAY})`; }
     else if (await restartProject()) { action = "restarted Supabase services"; reason = "services hung, database healthy, within limits"; s.restarts.unshift(nowIso()); s.restarts = s.restarts.slice(0, 20); }
     else { action = "alert only"; reason = "the restart request was refused by Supabase"; }
